@@ -1,0 +1,20 @@
+{
+  "name": "hardhat-project",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^2.0.0",
+    "@openzeppelin/contracts": "^4.8.0",
+    "@types/mocha": "^10.0.1",
+    "@types/node": "^18.11.18",
+    "hardhat": "^2.12.5",
+    "ts-node": "^10.9.1"
+  },
+  "scripts": {
+    "cleanup": "rm -rf ./typechain-types && rm -rf ./artifacts && rm -rf ./cache",
+    "test": "npx hardhat test",
+    "build": "npm run cleanup && npx hardhat compile",
+    "deploy": "ts-node scripts/deploy.ts"
+  },
+  "dependencies": {
+    "csv": "^6.2.5"
+  }
+}
