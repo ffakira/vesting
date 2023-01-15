@@ -1,9 +1,10 @@
 
 import { BigNumber } from "@ethersproject/bignumber"
-import { time } from "@nomicfoundation/hardhat-network-helpers"
 import { expect } from "chai"
+import hre from "hardhat"
 import { ethers } from "hardhat"
 import { 
+    BLOCK_PER_SECOND,
     createWhitelist,
     getWhitelist,
     ONE_MONTH 
@@ -13,14 +14,19 @@ type SafeBN = BigNumber | number | string
 
 enum VestingError {
     OWNABLE = "Ownable: caller is not the owner",
-    PAUSABLE = "Vesting: emergency pause",
+    PAUSABLE = "Pausable: emergency pause",
     EMPTY_WHITELIST_PARAMS = "Vesting: params cannot be empty",
+    PARAMS_LENGTH_NOT_EQUAL = "Vesting: params length are not equal",
+    CANNOT_DELIST = "Vesting: cannot delist after the lock period",
     NO_FUNDS = "Vesting: no funds to be withdrawn",
     LOCK_PERIOD = "Vesting: lock period have not passed"
 }
 
-describe("Core contracts", function() {
+describe("Pausable and Vesting contracts", function() {
     beforeEach(async function() {
+        /**
+         * @dev init contranct deployment instance
+         */
         [this.deployer, ...this.accounts] = await ethers.getSigners()
 
         const DegenToken = await ethers.getContractFactory("DegenToken")
@@ -29,6 +35,14 @@ describe("Core contracts", function() {
         const degenTokenAddress = (await this.degenToken.deployed()).address
         const Vesting = await ethers.getContractFactory("Vesting")
         this.vesting = await Vesting.deploy(degenTokenAddress, this.deployer.address)
+    })
+
+    afterEach(async function() {
+        /**
+         * @dev Cleanup. Reset the state of hardhat env, for tests
+         * that are dependent with `evm_mine`
+         */
+        await hre.network.provider.send("hardhat_reset") as Promise<any>
     })
 
     describe("Deployment", function() {
@@ -58,7 +72,7 @@ describe("Core contracts", function() {
         })
     })
 
-    describe("Vesting", function() {
+    describe("Pausable", function() {
         it("should fail calling pause or unpause with a user address", async function() {
             await expect(this.vesting.connect(this.accounts[1]).togglePause())
                 .to.be.revertedWith(VestingError.OWNABLE)
@@ -70,6 +84,48 @@ describe("Core contracts", function() {
                 .to.be.revertedWith(VestingError.OWNABLE)
         })
 
+        it("should fail if to claim tokens, when it is paused", async function() {
+            await this.vesting.pause()
+            await expect(this.vesting.claim()).to.be.revertedWith(VestingError.PAUSABLE)
+        })
+
+        it("should pause with the deployer address", async function() {
+            let emergencyPause = await this.vesting.emergencyPause()
+            expect(false).to.equal(emergencyPause)
+            
+            await expect(this.vesting.pause()).to.emit(this.vesting, "PauseEvent")
+                .withArgs(this.deployer.address, true)
+            emergencyPause = await this.vesting.emergencyPause()
+            expect(true).to.equal(emergencyPause)
+        })
+
+        it("should unpause with the deployer address", async function() {
+            let emergencyPause = await this.vesting.emergencyPause()
+            expect(false).to.equal(emergencyPause)
+
+            await expect(this.vesting.unpause()).to.emit(this.vesting, "UnpauseEvent")
+                .withArgs(this.deployer.address, false)
+            emergencyPause = await this.vesting.emergencyPause()
+            expect(false).to.equal(emergencyPause)
+        })
+
+        it("should togglePause with the deployer address", async function() {
+            let emergencyPause = await this.vesting.emergencyPause()
+            expect(false).to.equal(emergencyPause)
+
+            await expect(this.vesting.togglePause()).to.emit(this.vesting, "TogglePauseEvent")
+                .withArgs(this.deployer.address, true)
+            emergencyPause = await this.vesting.emergencyPause()
+            expect(true).to.equal(emergencyPause)
+
+            await expect(this.vesting.togglePause()).to.emit(this.vesting, "TogglePauseEvent")
+                .withArgs(this.deployer.address, false)
+            emergencyPause = await this.vesting.emergencyPause()
+            expect(false).to.equal(emergencyPause)
+        })
+    })
+
+    describe("Vesting", function() {
         it("should create a whitelist from a CSV file", async function() {
             const whitelist = await getWhitelist()
             await createWhitelist(this.vesting)
@@ -89,6 +145,32 @@ describe("Core contracts", function() {
             await expect(this.vesting.connect(this.accounts[1])
                 .whitelist([this.accounts[1].address], [ethers.utils.parseEther('10000')], [1]))
                 .to.be.revertedWith(VestingError.OWNABLE)
+        })
+
+        it("should fail passing an uneven params to whitelist", async function() {
+            const invalidAddressLength = [
+                [this.accounts[0].address, this.accounts[1].address],
+                new Array(3).fill(ethers.utils.parseEther("5000")),
+                new Array(3).fill(ONE_MONTH)
+            ]
+            await expect(this.vesting.whitelist(...invalidAddressLength))
+                .to.be.revertedWith(VestingError.PARAMS_LENGTH_NOT_EQUAL)
+
+            const invalidAmountLength = [
+                [this.accounts[0].address, this.accounts[2].address, this.accounts[3].address],
+                new Array(2).fill(ethers.utils.parseEther("5000")),
+                new Array(3).fill(ONE_MONTH)
+            ]
+            await expect(this.vesting.whitelist(...invalidAmountLength))
+                .to.be.revertedWith(VestingError.PARAMS_LENGTH_NOT_EQUAL)
+
+            const invalidLockPeriodLength = [
+                [this.accounts[0].address, this.accounts[2].address, this.accounts[3].address],
+                new Array(3).fill(ethers.utils.parseEther("5000")),
+                new Array(2).fill(ONE_MONTH)
+            ]
+            await expect(this.vesting.whitelist(...invalidLockPeriodLength))
+                .to.be.revertedWith(VestingError.PARAMS_LENGTH_NOT_EQUAL)
         })
 
         it("should delist all the users from CSV file", async function() {
@@ -116,25 +198,66 @@ describe("Core contracts", function() {
                 .to.be.revertedWith(VestingError.OWNABLE)
         })
 
+        it("should fail calling delist after lock period", async function() {
+            await createWhitelist(this.vesting)
+            await ethers.provider.send("evm_increaseTime", [ONE_MONTH + 1])
+            await expect(this.vesting.delist([this.accounts[1].address]))
+                .to.be.revertedWith(VestingError.CANNOT_DELIST)
+        })
+
         it("should allow users to claim token after one month", async function() {
+            let futureBlockTime = Math.ceil(Date.now() / 1000) + (ONE_MONTH + BLOCK_PER_SECOND * 5000)
+            
+            // transfer tokens to the vesting contract
             const vestingAddress = (await this.vesting.deployed()).address
             await this.degenToken.mint(vestingAddress, ethers.utils.parseEther("100000"))
             let balanceOf = await this.degenToken.balanceOf(vestingAddress)
             expect(ethers.utils.parseEther("100000")).to.deep.equal(balanceOf)
 
             await createWhitelist(this.vesting)
-            await ethers.provider.send("evm_increaseTime", [ONE_MONTH + 1])
-            await this.vesting.claim()
-            
-            const [user_, amount_] = await this.vesting.getWhitelist(this.deployer.address)
-            expect(this.deployer.address).to.equal(user_)
-            expect(BigNumber.from(0)).to.deep.equal(amount_)
+            await ethers.provider.send("evm_mine", [futureBlockTime])
 
+            balanceOf = await this.degenToken.balanceOf(this.deployer.address)
+            expect(BigNumber.from(0)).to.deep.equal(balanceOf)
+
+            // first claim: (partial claim)
+            await this.vesting.claim()
+            let calculateReward = await this.vesting.calculateReward(this.deployer.address)
+            balanceOf = await this.degenToken.balanceOf(this.deployer.address)
+            expect(calculateReward).to.deep.equal(balanceOf)
+
+            // second claim: (should limit to claim all tokens: 10000)
+            futureBlockTime = Math.ceil(Date.now() / 1000) + (ONE_MONTH + BLOCK_PER_SECOND * 100_000)
+            await ethers.provider.send("evm_mine", [futureBlockTime])
+            const remainingReward = await this.vesting.eligibleClaimAmount(this.deployer.address)
+            expect(ethers.utils.parseEther("10000")).to.deep.equal(remainingReward.add(balanceOf))
+
+            await this.vesting.claim()
             balanceOf = await this.degenToken.balanceOf(this.deployer.address)
             expect(ethers.utils.parseEther("10000")).to.deep.equal(balanceOf)
 
-            balanceOf = await this.degenToken.balanceOf(vestingAddress)
-            expect(ethers.utils.parseEther("90000")).to.deep.equal(balanceOf)
+            const eligibleClaimAmount = await this.vesting.eligibleClaimAmount(this.deployer.address)
+            expect(BigNumber.from("0")).to.deep.equal(eligibleClaimAmount)
+
+            calculateReward = await this.vesting.calculateReward(this.deployer.address)
+            expect(BigNumber.from("0")).to.deep.equal(calculateReward)
+        })
+
+        it("should calculate the correct reward given to the user", async function () {
+            const futureBlockTime = Math.ceil(Date.now() / 1000) + (ONE_MONTH + BLOCK_PER_SECOND * 10_000)
+
+            await createWhitelist(this.vesting)
+            await ethers.provider.send("evm_mine", [futureBlockTime])
+
+            const rewardPerSecond = ethers.utils.parseEther("10000").div(BigNumber.from(ONE_MONTH.toString()))
+            const getBlockNumber = await ethers.provider.getBlockNumber()
+            const blockTimestamp = (await ethers.provider.getBlock(getBlockNumber)).timestamp
+            const updatedAt = (await this.vesting.getWhitelist(this.deployer.address)).updatedAt_
+            const lastRewardPeriod = BigNumber.from(blockTimestamp).sub(updatedAt)
+            const eligibleReward = lastRewardPeriod.mul(rewardPerSecond)
+
+            const calculateReward = await this.vesting.calculateReward(this.deployer.address)
+            expect(eligibleReward).to.deep.equal(calculateReward)
         })
 
         it("should fail to claim tokens, lock period time have not passed", async function() {
@@ -143,10 +266,15 @@ describe("Core contracts", function() {
         })
 
         it("should fail if the users already claimed tokens", async function() {
+            const futureBlockTime = Math.ceil(Date.now() / 1000) + (ONE_MONTH + BLOCK_PER_SECOND * 200_000)
             const vestingAddress = (await this.vesting.deployed()).address
             await this.degenToken.mint(vestingAddress, ethers.utils.parseEther("100000"))
+
             await createWhitelist(this.vesting)
-            await ethers.provider.send("evm_increaseTime", [ONE_MONTH + 1])
+            await ethers.provider.send("evm_mine", [futureBlockTime])
+
+            await this.vesting.claim()
+            await expect(this.vesting.claim()).to.be.revertedWith(VestingError.NO_FUNDS)
         })
     })
 })

@@ -1,3 +1,4 @@
+soljson-v0.8.17+commit.8df45f5f.js
 node_modules
 .env
 coverage
@@ -9,5 +10,4 @@ typechain-types
 cache
 artifacts
 
-
-./test/utils/whitelist.csv
+.vscode

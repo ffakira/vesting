@@ -7,6 +7,7 @@ import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers"
 export const ZERO_ADDRESS = `0x${'0'.repeat(40)}`
 export const WEI = 1e18
 export const ONE_MONTH = 60 * 60 * 24 * 30
+export const BLOCK_PER_SECOND = 26
 
 export async function createWhitelist(vestingInstance: Contract): Promise<void> {
     const accounts = await ethers.getSigners()
@@ -14,8 +15,8 @@ export async function createWhitelist(vestingInstance: Contract): Promise<void> 
     await _createWhitelistCSV(addressList, 'test')
 
     const whitelist = await getWhitelist()
-    const amountToEther = whitelist[1].map(val => ethers.utils.parseEther(val))
-    await vestingInstance.whitelist(whitelist[0], amountToEther, whitelist[2])
+    whitelist[1] = whitelist[1].map(val => ethers.utils.parseEther(val)) as any
+    await vestingInstance.whitelist(...whitelist)
 }
 
 /**
@@ -77,7 +78,7 @@ async function _createWhitelistCSV(addressList: string[], nodeEnv?: string) {
             if (err.message.includes('ENOENT: no such file or directory, access')) {
                 for (const data of generateCSV) {
                     await fs.appendFile(pathFile, data)
-                    await _delay(50)
+                    await _delay(10)
                 }
             }
         }
