@@ -1,8 +1,7 @@
 
 import { BigNumber } from "@ethersproject/bignumber"
 import { expect } from "chai"
-import hre from "hardhat"
-import { ethers } from "hardhat"
+import hre, { ethers } from "hardhat"
 import { 
     BLOCK_PER_SECOND,
     createWhitelist,
@@ -34,7 +33,7 @@ describe("Pausable and Vesting contracts", function() {
 
         const degenTokenAddress = (await this.degenToken.deployed()).address
         const Vesting = await ethers.getContractFactory("Vesting")
-        this.vesting = await Vesting.deploy(degenTokenAddress, this.deployer.address)
+        this.vesting = await Vesting.deploy(degenTokenAddress)
     })
 
     afterEach(async function() {
@@ -42,7 +41,7 @@ describe("Pausable and Vesting contracts", function() {
          * @dev Cleanup. Reset the state of hardhat env, for tests
          * that are dependent with `evm_mine`
          */
-        await hre.network.provider.send("hardhat_reset") as Promise<any>
+        await hre.network.provider.send("hardhat_reset")
     })
 
     describe("Deployment", function() {

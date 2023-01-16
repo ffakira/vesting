@@ -3,6 +3,7 @@ pragma solidity ^0.8.17;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./interfaces/IVesting.sol";
@@ -10,13 +11,16 @@ import "./Pausable.sol";
 
 /**
  * @author Akira F. <ffakira>
- * @title Basic Vesting Contract
- * @notice A basic vesting schedule, allow operators to batch whitelist
+ * @title Basic MerkleVesting Contract
+ * @notice A basic vesting schedule, allow operators to verify 
+ * merkle tree proof for whitelist users
  */
-contract Vesting is ReentrancyGuard, Ownable, IVesting, Pausable {
+contract MerkleVesting is ReentrancyGuard, Ownable, IVesting, Pausable {
+    using MerkleProof for bytes32;
     using SafeERC20 for IERC20;
 
     IERC20 degenToken;
+    bytes32 public immutable merkleRoot;
 
     struct Whitelist {
         uint256 amount;
@@ -25,67 +29,60 @@ contract Vesting is ReentrancyGuard, Ownable, IVesting, Pausable {
         uint256 updatedAt;
     }
 
-    mapping (address => Whitelist) public userWhitelist;
+    mapping(address => Whitelist) public userWhitelist;
+    mapping(address => bool) public isWhitelist;
+    mapping(address => bool) public blacklist;
 
-    constructor(IERC20 _degenToken) {
+    event Blacklist(address indexed _user, bool _blacklist);
+
+    constructor(IERC20 _degenToken, bytes32 _merkleRoot) {
         degenToken = _degenToken;
+        merkleRoot = _merkleRoot;
     }
 
     /**
-     * @dev First option is to manually add an address. The length of each param should be equal.
-     * The limitation of making batch is that you will run into gas limit issues.
-     * @param _user provides an address[] of users
-     * @param _amount provides an uint256[] in wei
+     * @dev Second option is by providing the leaf node. The limitation,
+     * you need to keep in track the user => leaf node to verify the proof.
+     * @param _user provides an address
+     * @param _amount provides an amount
      * @param _lockPeriod provides the total seconds of lock period time
      */
     function whitelist(
-        address[] memory _user, 
-        uint256[] memory _amount, 
-        uint256[] memory _lockPeriod
-    ) public onlyOwner {
-        require(
-            _user.length != 0 &&
-            _amount.length != 0 &&
-            _lockPeriod.length != 0,
-            "Vesting: params cannot be empty"
-        );
-        require(
-            _user.length == _amount.length && 
-            _user.length == _lockPeriod.length && 
-            _amount.length == _lockPeriod.length, 
-            "Vesting: params length are not equal"
-        );
+        address _user,
+        uint256 _amount,
+        uint256 _lockPeriod, 
+        bytes32[] calldata merkleProof
+    ) public nonReentrant {
+        require(_user != address(0), "MerkleVesting: cannot be zero address");
+        require(!blacklist[_user], "MerkleVesting: address is blacklisted");
+        require(!isWhitelist[_user], "MerkleVesting: already whitelisted");
 
-        for (uint256 i; i < _user.length;) {
-            userWhitelist[_user[i]].amount = _amount[i];
-            userWhitelist[_user[i]].lockPeriod = block.timestamp + _lockPeriod[i];
-            userWhitelist[_user[i]].updatedAt = block.timestamp + _lockPeriod[i];
-            userWhitelist[_user[i]].claimedAmount = 0;
+        bytes32 node = keccak256(abi.encodePacked(_user, _amount, _lockPeriod));
+        require(MerkleProof.verify(merkleProof, merkleRoot, node), "MerkleVesting: invalid proof");
 
-            emit WhitelistEvent(_user[i], _amount[i], _lockPeriod[i]);
-            unchecked { i++; }
-        }
+        userWhitelist[_user].amount = _amount;
+        userWhitelist[_user].lockPeriod = block.timestamp + _lockPeriod;
+        userWhitelist[_user].updatedAt = block.timestamp + _lockPeriod;
+        userWhitelist[_user].claimedAmount = 0;
+
+        isWhitelist[_user] = true;
+        emit WhitelistEvent(_user, _amount, _lockPeriod);
     }
 
-    /**
-     * @dev You can delist users before the start time
-     * @param _user provides an address[] of users
-     */
-    function delist(address[] memory _user) public onlyOwner {
-        require(_user.length != 0, "Vesting: no users provided");
+    function addBlacklist(address _user) public onlyOwner {
+        blacklist[_user] = true;
+        emit Blacklist(_user, true);
+    }
 
-        unchecked {
-            for (uint256 i; i < _user.length; i++) {
-                require(block.timestamp < userWhitelist[_user[i]].lockPeriod, "Vesting: cannot delist after the lock period");
-                delete userWhitelist[_user[i]];
-                emit DelistEvent(_user[i]);
-            }
-        }
+    function removeBlacklist(address _user) public onlyOwner {
+        blacklist[_user] = false;
+        emit Blacklist(_user, false);
     }
 
     function claim() public nonReentrant pausable {
-        require(block.timestamp > userWhitelist[msg.sender].lockPeriod, "Vesting: lock period have not passed");
-        require(calculateReward(msg.sender) != 0, "Vesting: no funds to be withdrawn");
+        require(!blacklist[msg.sender], "MerkleVesting: address is blacklisted");
+        require(block.timestamp > userWhitelist[msg.sender].lockPeriod, "MerkleVesting: lock period have not passed");
+        require(calculateReward(msg.sender) != 0, "MerkleVesting: no funds to be withdrawn");
         _claim(msg.sender);
     }
 
@@ -101,7 +98,7 @@ contract Vesting is ReentrancyGuard, Ownable, IVesting, Pausable {
     /**
      * @param _user address of user
      */
-    function calculateReward(address _user) public view returns (uint256 _totalReward) {
+    function calculateReward(address _user) public virtual view returns (uint256 _totalReward) {
         uint256 _claimAmount = eligibleClaimAmount(_user);
         uint256 _rewardPerSecond = userWhitelist[_user].amount / 30 days;
 

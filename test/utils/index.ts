@@ -1,13 +1,44 @@
 import fs from "fs/promises"
 import path from "path"
 import { ethers } from "hardhat"
-import { Contract } from "ethers"
+import { Contract, utils } from "ethers"
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers"
+import { keccak256 } from "@ethersproject/keccak256"
+import { MerkleTree } from "merkletreejs"
 
 export const ZERO_ADDRESS = `0x${'0'.repeat(40)}`
-export const WEI = 1e18
 export const ONE_MONTH = 60 * 60 * 24 * 30
 export const BLOCK_PER_SECOND = 26
+
+interface VerifyTree {
+    tree: MerkleTree,
+    root: Buffer,
+    leaf: string[]
+}
+
+/**
+ * @dev get whitelist.csv file and encode abi 
+ * to create a merkle tree
+ */
+export async function generateMerkleTree(): Promise<VerifyTree> {
+    const whitelist = await getWhitelist()
+    const nodeLeaves = []
+
+    whitelist[1] = whitelist[1].map(val => ethers.utils.parseEther(val)) as any
+    for (let i = 0; i < whitelist[0].length; i++) {
+        nodeLeaves.push(utils.solidityKeccak256(
+            ["address", "uint256", "uint256"],
+            [whitelist[0][i], whitelist[1][i], whitelist[2][i]]
+        ))
+    }
+    const merkleTree = new MerkleTree(nodeLeaves, keccak256, { sortPairs: true })
+
+    return {
+        tree: merkleTree,
+        root: merkleTree.getRoot(),
+        leaf: nodeLeaves
+    }
+}
 
 export async function createWhitelist(vestingInstance: Contract): Promise<void> {
     const accounts = await ethers.getSigners()
@@ -72,6 +103,10 @@ async function _createWhitelistCSV(addressList: string[], nodeEnv?: string) {
     try {
         await fs.access(pathFile, fs.constants.R_OK | fs.constants.W_OK)
         await fs.writeFile(pathFile, '')
+        for (const data of generateCSV) {
+            await fs.appendFile(pathFile, data)
+            await _delay(10)
+        }
     } catch (err) {
         if (err instanceof Error) {
             // no file, write it

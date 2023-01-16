@@ -14,7 +14,10 @@ const config: HardhatUserConfig = {
   networks: {
     truffle: {
       url: "http://127.0.0.1:7545",
-      allowUnlimitedContractSize: true
+      allowUnlimitedContractSize: true,
+      accounts: {
+        mnemonic: "test test test test test test test test test test test junk"
+      }
     }
   }
 };

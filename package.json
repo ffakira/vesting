@@ -6,6 +6,7 @@
     "@types/mocha": "^10.0.1",
     "@types/node": "^18.11.18",
     "hardhat": "^2.12.5",
+    "merkletreejs": "^0.3.9",
     "ts-node": "^10.9.1"
   },
   "scripts": {
@@ -13,8 +14,5 @@
     "test": "npx hardhat test",
     "build": "npm run cleanup && npx hardhat compile",
     "deploy": "ts-node scripts/deploy.ts"
-  },
-  "dependencies": {
-    "csv": "^6.2.5"
   }
 }
