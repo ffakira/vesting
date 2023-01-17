@@ -11,7 +11,7 @@ jobs:
       - name: Make .env file
         uses: SpicyPizza/create-envfile@v1.3.1
         with:
-          envkey_SIGNER_PRIVATE_KEY: ${{ secrets.COOKIE_NAME }}
+          envkey_SIGNER_PRIVATE_KEY: ${{ secrets.SIGNER_PRIVATE_KEY }}
           directory: '../../'
           file_name: '.env'
           fail_on_empty: true
