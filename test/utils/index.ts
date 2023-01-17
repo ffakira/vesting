@@ -5,6 +5,8 @@ import { Contract, utils } from "ethers"
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers"
 import { keccak256 } from "@ethersproject/keccak256"
 import { MerkleTree } from "merkletreejs"
+import dotenv from "dotenv"
+dotenv.config()
 
 export const ZERO_ADDRESS = `0x${'0'.repeat(40)}`
 export const ONE_MONTH = 60 * 60 * 24 * 30
@@ -14,6 +16,35 @@ interface VerifyTree {
     tree: MerkleTree,
     root: Buffer,
     leaf: string[]
+}
+
+/**
+ * @dev generate r, s, v value ECDSA to be verified by
+ * `SignVesting.sol` contract
+ */
+export async function generateSignature() {
+    const whitelist = await getWhitelist()
+    const signer = new ethers.Wallet(process.env.SIGNER_PRIVATE_KEY as string)
+
+    const signatureList = []
+
+    whitelist[1] = whitelist[1].map(val => ethers.utils.parseEther(val)) as any
+    for (let i = 0; i < whitelist[0].length; i++) {
+        const listSignMessages = ethers.utils.solidityKeccak256(
+            ["address", "uint256", "uint256", "uint256"],
+            [whitelist[0][i], whitelist[1][i], whitelist[2][i], 1]
+        )
+        const msgHashBinary = ethers.utils.arrayify(listSignMessages)
+
+        const flatSig = await signer.signMessage(msgHashBinary)
+        const {r, s, v} = ethers.utils.splitSignature(flatSig)
+        signatureList.push({r, s, v})
+    }
+
+    return {
+        signerAddress: signer.address,
+        signatureList
+    }
 }
 
 /**

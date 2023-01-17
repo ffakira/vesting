@@ -7,7 +7,7 @@ In the `contracts` folder there are three different whitelist mechanism:
 
 * `Vesting.sol` batch of `adddress[]` users whitelist
 * `MerkleVesting.sol` whitelist users by merkle tree
-* `SignVesting.sol` through ECDSA
+* `SignVesting.sol` whitelist users by [ECDSA](https://ethereum.org/en/glossary/#ecdsa)
 
 There are some unit tests provided for each of the smart contracts, along with some additional
 helper functions in the `test/utils` folder.
@@ -31,7 +31,7 @@ it may potentially run out of gas.
 * Ideally you would batch smaller list of addresses.
 * It can be very expensive when you are doing a large amount of users.
 
-Here is an implementation of the `whitelist` mechanism for batch implemntation
+Here is an implementation of the `whitelist` mechanism for batch
 
 ```sol
 function whitelist(
@@ -174,9 +174,92 @@ await merkleVestingInstance.whitelist(
 
 The `MerkleVesting.sol` has the same implementation for the remaining functions as `Vesting.sol` except for `whitelist` function.
 
-An implementation of batch whitelist is seen at `test/utils/index.ts` at `generateMerkleTree()` function
+An implementation of batch whitelist is seen at `test/utils/index.ts` at `generateMerkleTree()` function. Unlike `Vesting.sol` where you remove users by calling `delist()`, for `MerkleVesting.sol` is required to call `addBlacklist()` function to prevent users from whitelist again.
+
+**Note**: Once the users have whitelisted, you need to keep in track to prevent the users to reclaim tokens again, you need to update `isWhitelist`.
 
 Along with a unit test provided at `test/MerkleVesting.test.ts`
   * `should provide the correct leaf hash to whitelist user`
 
 #### `SignVesting.sol` contract
+* ECDSA can potentially can have security risks, if not implemented correctly in a smart contract (e.g.: replay attack, can easily be solved by providing a nonce)
+* Easy to setup, and allows to create new offline signature, to allow new whitelist addresses, unlike `MerkleVesting.sol` where it requires to change the tree root. Or `Vesting.sol` requiring additional gas cost. With `SignVesting.sol` you are able to create offline signatures, and let the user verify it.
+* If the signer's private key gets compromised, than the entire smart contract gets compromised. Since the attacker will be able to create valid signatures, putting the smart contract at a risk! For security reason, never re-use signer's private key when generating new offline transactions.
+
+Here is an example of `whitelist` mechanism for ECDSA / sign implementation
+
+```sol
+function whitelist(
+    address _user, 
+    uint256 _amount, 
+    uint256 _lockPeriod,
+    uint256 _nonce,
+    uint8 v,
+    bytes32 r,
+    bytes32 s
+) public nonReentrant pausable {
+    require(!blacklist[_user], "SignVesting: address is blacklisted");
+    require(!nonce[_user][_nonce], "SignVesting: nonce already been used");
+    bytes32 hash = keccak256(abi.encodePacked(_user, _amount, _lockPeriod, _nonce));
+    bytes32 hashMessage = hash.toEthSignedMessageHash();
+    address ecRecover = ECDSA.recover(hashMessage, v, r, s);
+
+    require(ecRecover == signerAddress, "SignVesting: invalid signature");
+    userWhitelist[_user].amount = _amount;
+    userWhitelist[_user].lockPeriod = block.timestamp + _lockPeriod;
+    userWhitelist[_user].updatedAt = block.timestamp + _lockPeriod;
+    userWhitelist[_user].claimedAmount = 0;
+
+    nonce[_user][_nonce] = true;
+    emit WhitelistEvent(_user, _amount, _lockPeriod);
+}
+```
+
+Usage, let's take same example as before where 2 addresses to be whitelisted alice (0x08C8...36f) and bob (0x2b22...038)
+
+```js
+import { ethers } from "hardhat"
+
+const ONE_WEEK = 60 * 60 * 24 * 7
+
+// Same whitelist as previous example
+const whitelist = [
+    ["0x08C8e533722578834BC844413d3B11e834f1e36f", "0x2b221d0aFB3309b7E7A6e61a24eFd4B12Adc1038"],
+    [ethers.utils.parseEther("5000"), ethers.utils.parseEther("9000")],
+    [ONE_WEEK, ONE_WEEK]
+]
+const signatureList = []
+const signer = new ethers.Wallet(process.env.SIGNER_PRIVATE_KEY)
+
+// convert amount to wei
+whitelist[1] = whitelist[1].map(amount => ethers.utils.parseEther(val))
+for (let i = 0; i < whitelist[0].length; i++) {
+    const listSignMessages = ethers.utils.solidityKeccack256(
+        ["address", "uint256", "uint256", "uint256"],
+        [whitelist[0][i], whitelist[1][i], whitelist[2][i], 1]
+    )
+    const msgHashBinary = ethers.utils.arrayify(listSignMessages)
+
+    // sign the message
+    const flatSig = await ethers.signMessage(msgHashBinary)
+    const {r, s, v} = ethers.utils.splitSignature(flatSig)
+    signatureList.push({r, s, v})
+}
+
+await signVestingInstance.whitelist(
+    whitelist[0][0],
+    whitelist[1][0],
+    whitelist[2][0],
+    1
+    signatureList[0].v,
+    signatureList[0].r,
+    signatureList[0].s
+)
+```
+
+An implementation of ECDSA / sign whitelist is seen at `test/utils/index.ts` at `generateSignature()` function
+
+**Note**: Once the users have whitelisted, you need to keep in track of nonce, to prevent replay attacks.
+
+Along with a unit test provided at `test/SignVesting.test.ts`
+  * `should get a valid signature to whitelist user`

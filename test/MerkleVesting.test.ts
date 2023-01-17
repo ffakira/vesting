@@ -52,9 +52,7 @@ describe("MerkleVesting contracts", function() {
 
                 const isWhitelist = await this.merkleVesting.isWhitelist(accounts[i].address)
                 expect(true).to.equal(isWhitelist)
-            }
-    
-            for (let i = 0; i < accounts.length; i++) {
+
                 const [user_, amount_] = await this.merkleVesting.getWhitelist(accounts[i].address)
                 expect(accounts[i].address).to.equal(user_)
                 expect(ethers.utils.parseEther("10000")).to.deep.equal(amount_)
@@ -141,9 +139,9 @@ describe("MerkleVesting contracts", function() {
 
             // claim
             await this.merkleVesting.claim()
-            const claculateReward = await this.merkleVesting.calculateReward(this.deployer.address)
+            const calculateReward = await this.merkleVesting.calculateReward(this.deployer.address)
             balanceOf = await this.degenToken.balanceOf(this.deployer.address)
-            expect(claculateReward).to.deep.equal(balanceOf)
+            expect(calculateReward).to.deep.equal(balanceOf)
         })
 
         it("should fail users to claim token when their blacklisted", async function() {
