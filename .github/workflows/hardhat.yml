@@ -8,6 +8,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Make .env file
+        uses: SpicyPizza/create-envfile@v1.3.1
+        with:
+          envkey_SIGNER_PRIVATE_KEY: ${{ secrets.COOKIE_NAME }}
+          directory: '../../'
+          file_name: '.env'
+          fail_on_empty: true
       - uses: actions/checkout@v3
       - name: Use Node.js 18
         uses: actions/setup-node@v3
