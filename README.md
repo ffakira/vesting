@@ -1,12 +1,12 @@
 # Simple Vesting Contract
 
-The contracts allow to read from a CSV file, and whitelist three different ways: batch, merkle tree and offline signing transaction.
+The contracts allow to read from a CSV file, and whitelist three different ways: batch, merkle tree and ECDSA.
 
 In the `contracts` folder there are three different whitelist mechanism:
 
 * `Vesting.sol` batch of `adddress[]` users whitelist
 * `MerkleVesting.sol` whitelist users by merkle tree
-* `SignVesting.sol` offchain vesting
+* `SignVesting.sol` through ECDSA
 
 There are some unit tests provided for each of the smart contracts, along with some additional
 helper functions in the `test/utils` folder.
@@ -178,4 +178,4 @@ An implementation of batch whitelist is seen at `test/utils/index.ts` at `genera
 Along with a unit test provided at `test/MerkleVesting.test.ts`
   * `should provide the correct leaf hash to whitelist user`
 
-### `SignVesting.sol` contract
+#### `SignVesting.sol` contract
