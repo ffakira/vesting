@@ -1,3 +1,4 @@
+![Solidity unit test](https://github.com/ffakira/vesting/actions/workflows/hardhat.yml/badge.svg)
 # Simple Vesting Contract
 
 The contracts allow to read from a CSV file, and whitelist three different ways: batch, merkle tree and ECDSA.
