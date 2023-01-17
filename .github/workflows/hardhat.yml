@@ -23,4 +23,4 @@ jobs:
       - name: Install node modules
         run: npm ci
       - name: Unit test solidity
-        run: npx hardhat test
+        run: SIGNER_PRIVATE_KEY=${{ secrets.SIGNER_PRIVATE_KEY }} npx hardhat test
